@@ -1,0 +1,4 @@
+{"id": "srikarthikeyaa/traser-fast6", "title": "traser-fast6", "code_file": "fast6.py", "language": "python", "kernel_type": "script",
+ "is_private": true, "enable_gpu": true, "enable_tpu": false, "enable_internet": false,
+ "dataset_sources": ["srikarthikeyaa/svg2test-vipseg"], "competition_sources": ["arc-prize-2026-arc-agi-3"],
+ "kernel_sources": ["srikarthikeyaa/traser-assets"], "model_sources": [], "machine_shape": "NvidiaRtxPro6000"}

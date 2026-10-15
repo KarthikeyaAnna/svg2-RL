@@ -1,0 +1,23 @@
+{
+  "id": "srikarthikeyaa/traser-pairdecode",
+  "title": "traser-pairdecode",
+  "code_file": "run_pairs.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "keywords": [],
+  "dataset_sources": [
+    "srikarthikeyaa/svg2test-vipseg"
+  ],
+  "kernel_sources": [
+    "srikarthikeyaa/traser-assets"
+  ],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
+  "model_sources": [],
+  "machine_shape": "NvidiaRtxPro6000"
+}

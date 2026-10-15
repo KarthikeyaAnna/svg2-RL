@@ -1,0 +1,74 @@
+# ---- secrets / credentials (Kaggle account 2 config lives here)
+k2home/
+kaggle.json
+*.token
+.env
+
+# ---- environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.cache/
+.ipynb_checkpoints/
+
+# ---- large data (19 GB) and model/processor files (re-downloadable from HF)
+data/
+qwen_proc/
+traser_cfg/
+*.parquet
+*.zip
+*.tar
+*.mp4
+*.npz
+*.pt
+*.safetensors
+
+# ---- run outputs (Kaggle results, judge caches, rollouts)
+out/
+kaggle/ds-pvsg/
+kaggle/**/*.log
+*.jsonl
+
+# ---- generated Kaggle scripts (rebuilt by kaggle/build.py / kaggle/e1/build_e1.py)
+kaggle/fast4/fast4.py
+kaggle/fast5/fast5.py
+kaggle/fast6/fast6.py
+kaggle/profile/profile.py
+kaggle/e1/A0/e1_a0.py
+
+# ---- third-party code (upstream TraSeR/SVG2 repo, cloned separately)
+SVG2/
+
+# ---- LaTeX build artefacts
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.synctex.gz
+report/*.fls
+report/*.fdb_latexmk
+
+# ---- editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# ==== not for the shared repo (internal notes, personal tooling, superseded iterations)
+# personal Kaggle wrapper (reads a private token from the home directory)
+k2.sh
+# internal research notes and superseded plans
+RESEARCH_LOG.md
+plans/
+# old report drafts and figure scratch; only report/traser_salience.{tex,pdf} are shared
+report/traser_salience_v*
+report/png/
+# superseded speed-iteration kernels (the current engine is engine/traser_fast.py; kaggle/fast6 is its benchmark run)
+kaggle/fastbench/
+kaggle/fastbench2/
+kaggle/fast3/
+kaggle/fast4/
+kaggle/fast5/
+kaggle/speedtest/
+kaggle/profile/

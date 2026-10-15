@@ -1,0 +1,124 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{needspace}
+\usepackage[hidelinks]{hyperref}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\newcommand{\sig}{$^{\dagger}$}
+\newcommand{\nt}{n/t}
+
+\title{\textbf{TraSeR with training-free pair querying}\\[2pt]\large Results on SVG2test, PVSG-val and VidOR-val}
+\author{svg2-killtest project}
+\date{15 October 2026}
+
+\begin{document}
+\maketitle
+\vspace{-8mm}
+
+%=====================================================================
+\section{Summary}
+%=====================================================================
+Training-free post-processing on released TraSeR (Qwen2.5-VL-3B); relation P/R/F1.
+SVG2test: +40 contact-ranked pair queries, R 24.7$\to$\textbf{43.3}\sig\ (F1 n.s.); contact filter, F1 20.1$\to$\textbf{24.3}\sig.
+VidOR-val: the configuration pre-registered from SVG2test is null; an exploratory one (20 pairs + reverse-direction completion)
+gives F1 13.9$\to$\textbf{19.1}\sig, but contact ranking does not beat random pairs. PVSG-val: recall up, F1 down\sig. The contact filter helps SVG2test only (PVSG n.s., VidOR F1 $-2.2$\sig).
+No single configuration improves all three.
+
+%=====================================================================
+\section{Where TraSeR loses relations}
+%=====================================================================
+\begin{table}[H]
+\centering
+\caption{Outcome of every GT relation for released TraSeR (\% of GT relations; columns sum to 100). Matching as in Section~3; temporal IoU on the
+merged span.}
+\label{tab:miss}
+\small
+\begin{tabular}{lccc}
+\toprule
+ & SVG2test & PVSG-val & VidOR-val \\
+\midrule
+Found                                          & 25.1 & 6.7  & 5.7  \\
+Pair never mentioned                           & 49.8 & 47.3 & 22.9 \\
+Pair stated only in the other direction        & 7.3  & 4.0  & 27.8 \\
+Right pair, wrong predicate                    & 9.2  & 22.5 & 22.3 \\
+Right relation, wrong time span                & 1.7  & 17.5 & 21.3 \\
+Object not in TraSeR's input (cap / empty mask) & 7.0  & 2.0  & 0.0  \\
+\midrule
+Relations per video, TraSeR vs GT              & 55 vs 32 & 62 vs 16 & 12 vs 36 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=====================================================================
+\section{Setup}
+%=====================================================================
+\textbf{Data.} SVG2test: 67 VIPSeg videos, 66 scored (33 SA-V videos licence-gated, not run). PVSG-val: 62 videos, plus a 27-video clean
+subset (35/40 VidOR-sourced PVSG videos are in TraSeR's training set). VidOR-val: 835 videos. GT object masks are given (SVG2 protocol).
+
+\textbf{Systems.} All operate on TraSeR's output and the given GT masks; TraSeR's weights are unchanged.
+\begin{itemize}\setlength{\itemsep}{2pt}
+\item \textbf{Contact filter.} For every predicted relation (s, p, o), take the two objects' masks on the sampled frames
+      (4$\times$ downsampled), dilate one by 2 cells, and test overlap with the other. If they never overlap in any frame, the
+      relation is removed. Rationale: SVG2test annotators label 15.4\% of touching vs 0.8\% of non-touching pairs.
+\item \textbf{+$K$ salient.} (1) List object pairs that appear in no predicted relation. (2) Score each by the fraction of
+      co-visible frames in which the dilated masks touch; keep the top $K$. (3) For each pair, run TraSeR again with only those
+      two objects as input (same prompt) and parse the relations it returns. (4) Map them back to the original object IDs and
+      append them to the graph; exact duplicates are merged. Rationale: 50\% (SVG2test) / 47\% (PVSG) of all GT relations are
+      on pairs TraSeR never mentions (Table~1).
+\item \textbf{+20 random.} Steps (1), (3) and (4) with 20 pairs drawn uniformly from the unmentioned pairs: same number of extra
+      queries, no contact ranking (control).
+\item \textbf{Filter + 20 salient.} Contact filter, then +20 salient.
+\item \textbf{Both directions.} For each relation (s, p, o) whose predicate has a known inverse (e.g.\ above $\leftrightarrow$ below,
+      in front of $\leftrightarrow$ behind, on $\leftrightarrow$ under, inside $\leftrightarrow$ contains) or is symmetric (next to,
+      near, beside), add (o, p$^{-1}$, s) with the same time spans if it is not already present. Rationale: VidOR labels 81\% of
+      pairs in both directions, TraSeR 12\%.
+\end{itemize}
+VidOR-val config (filter + 20 salient) was fixed on SVG2test before any VidOR run.
+
+\textbf{Metric.} Match = same ordered pair, predicate equivalent under a Qwen3-8B judge (SVG2's five categories; stand-in for
+GPT-4o-mini), temporal IoU $\geq 0.5$ per span; exact duplicates merged. \sig: paired per-video bootstrap (2000), 95\% CI excludes 0.
+
+%=====================================================================
+\section{Results}
+%=====================================================================
+\begin{table}[H]
+\centering
+\caption{Relation P / R / F1 (\%). $^\dagger$ significantly different from TraSeR (paired per-video bootstrap, 95\% CI excludes 0).
+\textbf{Bold}: best per column. $^\ast$ pre-registered for VidOR-val.}
+\label{tab:main}
+\footnotesize\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{l ccc ccc ccc ccc}
+\toprule
+ & \multicolumn{3}{c}{SVG2test (66)} & \multicolumn{3}{c}{PVSG-val (62)} & \multicolumn{3}{c}{PVSG clean (27)} & \multicolumn{3}{c}{VidOR-val (835)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
+System & P & R & F1 & P & R & F1 & P & R & F1 & P & R & F1 \\
+\midrule
+TraSeR & 16.9 & 24.7 & 20.1 & 5.8 & 10.2 & 7.4 & 5.3 & 8.7 & 6.6 & 27.2 & 9.3 & 13.9 \\
+\midrule
+Contact filter & \textbf{27.4}$^\dagger$ & 21.8$^\dagger$ & \textbf{24.3}$^\dagger$ & \textbf{6.8}$^\dagger$ & 9.5 & \textbf{7.9} & \textbf{6.4} & 7.3 & \textbf{6.8} & \textbf{30.6}$^\dagger$ & 7.2$^\dagger$ & 11.7$^\dagger$ \\
++20 random (control) & 10.3$^\dagger$ & 27.7$^\dagger$ & 15.0$^\dagger$ & 2.8$^\dagger$ & 11.7 & 4.5$^\dagger$ & 2.1$^\dagger$ & 8.3 & 3.4$^\dagger$ & 20.0$^\dagger$ & 12.0$^\dagger$ & 15.0$^\dagger$ \\
+\midrule
++20 salient & 14.0$^\dagger$ & 35.8$^\dagger$ & 20.1 & 3.8$^\dagger$ & 15.5$^\dagger$ & 6.2 & 2.9$^\dagger$ & 11.7 & 4.7 & 25.3$^\dagger$ & 11.2$^\dagger$ & 15.5$^\dagger$ \\
++40 salient & 12.3$^\dagger$ & \textbf{43.3}$^\dagger$ & 19.2 & 2.9$^\dagger$ & \textbf{16.9}$^\dagger$ & 5.0$^\dagger$ & 2.3$^\dagger$ & \textbf{13.3}$^\dagger$ & 3.9$^\dagger$ & 25.3$^\dagger$ & 11.3$^\dagger$ & 15.6$^\dagger$ \\
+Filter + 20 salient$^{\ast}$ & 16.9 & 32.2$^\dagger$ & 22.1 & 4.1$^\dagger$ & 15.4$^\dagger$ & 6.4 & 3.2$^\dagger$ & 11.7 & 5.0 & 27.2 & 9.1 & 13.6 \\
+\midrule
+Both directions & 10.1$^\dagger$ & 26.1$^\dagger$ & 14.6$^\dagger$ & 3.7$^\dagger$ & 10.4 & 5.5$^\dagger$ & 3.5$^\dagger$ & 8.7 & 5.0$^\dagger$ & 24.5$^\dagger$ & 13.1$^\dagger$ & 17.1$^\dagger$ \\
++20 salient + both directions & 8.9$^\dagger$ & 38.7$^\dagger$ & 14.4$^\dagger$ & 2.6$^\dagger$ & 16.0$^\dagger$ & 4.5$^\dagger$ & 2.1$^\dagger$ & 12.1 & 3.6$^\dagger$ & 23.7$^\dagger$ & \textbf{16.0}$^\dagger$ & \textbf{19.1}$^\dagger$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Next step}
+%=====================================================================
+GRPO on TraSeR's own training data (same seven SVG2 splits) with a graph-matching reward (relation F1 with soft temporal IoU,
+object accuracy, format), one configuration for all three benchmarks; control: compute-matched SFT on the same videos. Gated on a
+pre-check: best-of-8 vs greedy reward on training videos.
+
+\end{document}

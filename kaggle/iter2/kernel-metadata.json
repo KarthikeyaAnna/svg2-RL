@@ -1,0 +1,26 @@
+{
+  "id": "srikarthikeyaa/traser-iter2",
+  "title": "traser-iter2",
+  "code_file": "run_iter2.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "keywords": [],
+  "dataset_sources": [
+    "srikarthikeyaa/svg2test-vipseg"
+  ],
+  "kernel_sources": [
+    "srikarthikeyaa/traser-assets",
+    "srikarthikeyaa/traser-randpairs"
+  ],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
+  "model_sources": [
+    "qwen-lm/qwen-3/transformers/8b/1"
+  ],
+  "machine_shape": "NvidiaRtxPro6000"
+}

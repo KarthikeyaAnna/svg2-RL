@@ -1,0 +1,27 @@
+{
+  "id": "srikarthikeyaa/traser-final",
+  "title": "traser-final",
+  "code_file": "run_final.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "keywords": [],
+  "dataset_sources": [
+    "srikarthikeyaa/svg2test-vipseg"
+  ],
+  "kernel_sources": [
+    "srikarthikeyaa/traser-assets",
+    "srikarthikeyaa/traser-svg2test",
+    "srikarthikeyaa/traser-pairdecode"
+  ],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
+  "model_sources": [
+    "qwen-lm/qwen-3/transformers/8b/1"
+  ],
+  "machine_shape": "NvidiaRtxPro6000"
+}

@@ -1,4 +1,5 @@
 import glob, json, os, subprocess, sys, time, math, random, itertools, collections, gc
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 def find(p, root="/kaggle/input"):
     h = sorted(glob.glob(f"{root}/{p}", recursive=True)); print("find", p, "->", h[:2], flush=True); return h[0]
 ASSETS = os.path.dirname(find("**/TRASER/config.json")); ROOT = os.path.dirname(ASSETS); OUT = "/kaggle/working"

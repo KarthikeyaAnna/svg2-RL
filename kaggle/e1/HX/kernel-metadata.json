@@ -1,0 +1,25 @@
+{
+ "id": "mankenasaikumar/traser-e1-hx",
+ "title": "traser-e1-hx",
+ "code_file": "e1_hx.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": false,
+ "dataset_sources": [
+  "srikarthikeyaa/svg2test-vipseg",
+  "srikarthikeyaa/pvsg-val-traser",
+  "srikarthikeyaa/traser-train-e1"
+ ],
+ "competition_sources": [
+  "arc-prize-2026-arc-agi-3"
+ ],
+ "kernel_sources": [
+  "srikarthikeyaa/traser-assets",
+  "srikarthikeyaa/vidor-prep"
+ ],
+ "model_sources": [],
+ "machine_shape": "NvidiaRtxPro6000"
+}

@@ -1,0 +1,27 @@
+{
+ "id": "srikarthikeyaa/traser-e1-g1",
+ "title": "traser-e1-g1",
+ "code_file": "e1_g1.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": false,
+ "dataset_sources": [
+  "srikarthikeyaa/svg2test-vipseg",
+  "srikarthikeyaa/pvsg-val-traser",
+  "srikarthikeyaa/traser-train-e1"
+ ],
+ "competition_sources": [
+  "arc-prize-2026-arc-agi-3"
+ ],
+ "kernel_sources": [
+  "srikarthikeyaa/traser-assets",
+  "srikarthikeyaa/vidor-prep"
+ ],
+ "model_sources": [
+  "qwen-lm/qwen-3/transformers/8b/1"
+ ],
+ "machine_shape": "NvidiaRtxPro6000"
+}

@@ -54,6 +54,7 @@ def train_arm():
         if i + 8 < len(items): futs.append(ex.submit(cpu_job, *items[i + 8]))
         prompt = STYLE_PROMPT_TRAIN[src]
         with torch.no_grad(): P = eng.gpu_stage(C, prompt=prompt)
+        if P["prefill"] > MAX_TRAIN_PREFILL: skipped += 1; continue                 # same a-priori memory rule as G1
         lab = srcs[src]["lab"][v]; objs = json.loads(lab["objects"]); rels = json.loads(lab["relationships"])
         kr = None
         if TARGET_VIEW[src] == "salient":
@@ -74,7 +75,13 @@ def train_arm():
     torch.cuda.empty_cache()
 # GRPO_PART
 if ARM in ("A1", "A2"): train_arm()
-elif ARM == "G1": grpo_arm()
+elif ARM in ("G1", "G2", "G3"): grpo_arm()
+elif ARM == "PS": pairsft_arm()
+elif ARM == "PG": pg_arm()
+elif ARM == "PV": pv_arm()
+elif ARM == "HX": hx_arm()
+elif ARM in ("SC", "SCB"): sc_arm()
+elif ARM == "PH": ph_arm()
 
 # ---------------- evaluation
 def dil(m, k=2):
@@ -137,9 +144,10 @@ for bn in BENCHES:
 if JUDGE_DIR:
     del model; gc.collect(); torch.cuda.empty_cache()
     pairs = set()
-    for bn in BENCHES:
+    for bn in sorted(set(BENCHES) | set(globals().get("PAIR_BENCHES", [])) | set(globals().get("SC_BENCHES", []))):
         gt = B[bn]["gt"]
-        for n in ("full", "pairs_sal", "pairs_rnd"):
+        for n in ("full", "pairs_sal", "pairs_rnd", "pairs_learned", "samples"):
+            if not os.path.exists(f"{OUT}/{bn}_{n}.jsonl"): continue
             for l in open(f"{OUT}/{bn}_{n}.jsonl"):
                 o = json.loads(l); kept = o["kept_obj_ids"]; g = gt[o["video_id"]]
                 P_ = collections.defaultdict(list)

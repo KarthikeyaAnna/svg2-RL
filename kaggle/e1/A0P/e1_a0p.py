@@ -1,4 +1,5 @@
 import glob, json, os, subprocess, sys, time, math, random, itertools, collections, gc
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 def find(p, root="/kaggle/input"):
     h = sorted(glob.glob(f"{root}/{p}", recursive=True)); print("find", p, "->", h[:2], flush=True); return h[0]
 ASSETS = os.path.dirname(find("**/TRASER/config.json")); ROOT = os.path.dirname(ASSETS); OUT = "/kaggle/working"
@@ -214,20 +215,29 @@ class SlotDecoder:
                 if (rows or new) and (len(rows) + len(cand)) * worst * KV_BYTES_PER_TOKEN > self.budget: break
                 new.append(q.popleft())
             if new:
-                e, pos, am_n, rope = pad_batch([P for _, P, _ in new], dev)
-                c_n = DynamicCache()
+                # Prefill each new sequence on its own: unpadded -> no attention mask -> fused causal SDPA. A padded multi-row
+                # prefill makes transformers materialise [B, H, L, L] attention (26 GB OOM on long PVSG prompts).
+                Lmax = max(P["e"].shape[1] for _, P, _ in new); caches, firsts = [], []
                 with torch.no_grad():
-                    h = self.lm(inputs_embeds=e, position_ids=pos, attention_mask=am_n, past_key_values=c_n, use_cache=True,
-                                cache_position=torch.arange(e.shape[1], device=dev)).last_hidden_state
-                    seen = torch.zeros((len(new), V), dtype=torch.bool, device=dev)
-                    first = self._pick(self._logits(h, seen))
+                    for _, P, _ in new:
+                        n_ = P["e"].shape[1]; c1 = DynamicCache()
+                        h = self.lm(inputs_embeds=P["e"], position_ids=P["pos"], attention_mask=torch.ones((1, n_), dtype=torch.long, device=dev),
+                                    past_key_values=c1, use_cache=True, cache_position=torch.arange(n_, device=dev)).last_hidden_state
+                        firsts.append(self._pick(self._logits(h, torch.zeros((1, V), dtype=torch.bool, device=dev)))[0]); caches.append(c1)
+                    first = torch.stack(firsts)
+                    c_n = caches[0]
+                    for Ls in zip(*[c.layers for c in caches]):
+                        Ls[0].keys = torch.cat([self._fit(L.keys, Lmax) for L in Ls], 0)
+                        Ls[0].values = torch.cat([self._fit(L.values, Lmax) for L in Ls], 0)
+                    am_n = torch.cat([self._fit(torch.ones((1, P["e"].shape[1]), dtype=torch.long, device=dev), Lmax) for _, P, _ in new], 0)
+                    del caches
                 nr = []
                 for j, (k, P, c) in enumerate(new):
                     n = P["e"].shape[1]
                     nr.append(dict(key=k, cap=c, gen=[int(first[j])], tok=int(first[j]), pos=n + int(P["rope"].reshape(-1)[0]),
                                    len=n + 1, stop=None, seen=None))
                 if rows:
-                    S = max(max(r["len"] - 1 for r in rows), e.shape[1])     # current cache length needed (tokens already in cache)
+                    S = max(max(r["len"] - 1 for r in rows), Lmax)     # current cache length needed (tokens already in cache)
                     for Lo, Ln in zip(cache.layers, c_n.layers):
                         Lo.keys = torch.cat([self._fit(Lo.keys, S), self._fit(Ln.keys, S)], 0)
                         Lo.values = torch.cat([self._fit(Lo.values, S), self._fit(Ln.values, S)], 0)

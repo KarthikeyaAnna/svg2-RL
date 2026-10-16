@@ -27,14 +27,24 @@ def grpo_arm():
     params = lora_params(model); opt = torch.optim.AdamW(params, lr=LR, weight_decay=0.0)
     lm = model.model.language_model; hist = []; t0 = time.time()
     model.eval(); d0 = dev_reward(srcs, dv); hist.append(dict(step=0, dev=d0)); print("GRPO dev step 0", json.dumps(d0), flush=True)
-    rng = random.Random(1); names = sorted(tr)
+    SEED_ = globals().get("TRAIN_SEED", 0)
+    if SEED_: torch.manual_seed(SEED_)
+    rng = random.Random(1 + 1000 * SEED_); names = sorted(tr); skipped_long = 0; oom = 0
     for step in range(1, NSTEPS + 1):
         if time.time() - t0 > TRAIN_SECONDS: print("time budget reached at step", step, flush=True); break
-        batch = [(n_, rng.choice(tr[n_])) for n_ in (names * BATCH_PROMPTS)[:BATCH_PROMPTS]]      # equal weight per source
+        if globals().get("SOURCE_WEIGHTS"):                                                    # e.g. TraSeR's natural mix
+            srcs_ = rng.choices(names, weights=[SOURCE_WEIGHTS[n_] for n_ in names], k=BATCH_PROMPTS)
+        else:
+            srcs_ = (names * BATCH_PROMPTS)[:BATCH_PROMPTS]                                    # equal weight per source
+        batch = [(n_, rng.choice(tr[n_])) for n_ in srcs_]
         model.eval(); tg0 = time.time()
         with torch.no_grad():
             Ps = {v: eng.gpu_stage(eng.cpu_stage(**srcs[n_]["cpu_fn"](v)), prompt="scene_graph") for n_, v in batch}
-            dec = SlotDecoder(model, ftok, 64, 40.0, 64, True, log=lambda s: None, temperature=TEMP, top_p=TOP_P, seed=step)
+            long_ = [v for v in Ps if Ps[v]["prefill"] > MAX_TRAIN_PREFILL]                  # a-priori memory rule
+            skipped_long += len(long_); batch = [(n_, v) for n_, v in batch if v not in long_]
+            for v in long_: del Ps[v]
+            if not batch: continue
+            dec = SlotDecoder(model, ftok, 64, 40.0, 64, True, log=lambda s: None, temperature=TEMP, top_p=TOP_P, seed=step + 100000 * SEED_)
             ro = dec.run([(f"{v}#{g}", Ps[v], token_cap(Ps[v]["n_obj"])) for _, v in batch for g in range(G)])
         tg = time.time(); stats = collections.defaultdict(list); nupd = 0
         lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False}); model.train()
@@ -47,12 +57,15 @@ def grpo_arm():
             for g in range(G):
                 ids = ro[f"{v}#{g}"]["ids"]
                 if not ids or abs(adv[g]) < 1e-9: continue
-                loss, kl = grpo_loss(eng, Ps[v], ids, float(adv[g]), beta=BETA, norm_len=NORM_LEN)
-                (loss / (BATCH_PROMPTS * G)).backward(); stats["kl"].append(kl); nupd += 1
+                try:
+                    loss, kl = grpo_loss(eng, Ps[v], ids, float(adv[g]), beta=BETA, norm_len=NORM_LEN)
+                    (loss / (BATCH_PROMPTS * G)).backward(); stats["kl"].append(kl); nupd += 1
+                except torch.OutOfMemoryError:
+                    oom += 1; loss = None; torch.cuda.empty_cache()
         if nupd:
             torch.nn.utils.clip_grad_norm_(params, 1.0); opt.step(); opt.zero_grad(set_to_none=True)
         lm.gradient_checkpointing_disable(); model.eval()
-        rec = dict(step=step, upd=nupd, t_gen=round(tg - tg0, 1), t_upd=round(time.time() - tg, 1), sec=round(time.time() - t0), **{k: float(np.mean(v_)) for k, v_ in stats.items()})
+        rec = dict(step=step, upd=nupd, skipped_long=skipped_long, oom=oom, t_gen=round(tg - tg0, 1), t_upd=round(time.time() - tg, 1), sec=round(time.time() - t0), **{k: float(np.mean(v_)) for k, v_ in stats.items()})
         hist.append(rec); print("GRPO", json.dumps(rec), flush=True)
         del Ps, ro; gc.collect(); torch.cuda.empty_cache()
         if step % EVAL_EVERY == 0:

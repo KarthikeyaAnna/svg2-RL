@@ -185,7 +185,7 @@ class SlotDecoder:
             # ---- maintenance: retire finished rows, admit queued ones
             done = [i for i, r in enumerate(rows) if r["stop"]]
             for i in done:
-                r = rows[i]; out[r["key"]] = dict(text=self.ftok.decode(r["gen"], skip_special_tokens=True), n_tokens=len(r["gen"]), stop=r["stop"], ids=list(r["gen"]))
+                r = rows[i]; out[r["key"]] = dict(text=self.ftok.decode(r["gen"], skip_special_tokens=True), n_tokens=len(r["gen"]), stop=r["stop"], ids=list(r["gen"]), lp=list(r["lp"]))
             keep = [i for i, r in enumerate(rows) if not r["stop"]]
             if done and keep:
                 idx = torch.tensor(keep, device=dev)
@@ -201,20 +201,30 @@ class SlotDecoder:
                 if (rows or new) and (len(rows) + len(cand)) * worst * KV_BYTES_PER_TOKEN > self.budget: break
                 new.append(q.popleft())
             if new:
-                e, pos, am_n, rope = pad_batch([P for _, P, _ in new], dev)
-                c_n = DynamicCache()
+                # Prefill each new sequence on its own: unpadded -> no attention mask -> fused causal SDPA. A padded multi-row
+                # prefill makes transformers materialise [B, H, L, L] attention (26 GB OOM on long PVSG prompts).
+                Lmax = max(P["e"].shape[1] for _, P, _ in new); caches, firsts, flps = [], [], []
                 with torch.no_grad():
-                    h = self.lm(inputs_embeds=e, position_ids=pos, attention_mask=am_n, past_key_values=c_n, use_cache=True,
-                                cache_position=torch.arange(e.shape[1], device=dev)).last_hidden_state
-                    seen = torch.zeros((len(new), V), dtype=torch.bool, device=dev)
-                    first = self._pick(self._logits(h, seen))
+                    for _, P, _ in new:
+                        n_ = P["e"].shape[1]; c1 = DynamicCache()
+                        h = self.lm(inputs_embeds=P["e"], position_ids=P["pos"], attention_mask=torch.ones((1, n_), dtype=torch.long, device=dev),
+                                    past_key_values=c1, use_cache=True, cache_position=torch.arange(n_, device=dev)).last_hidden_state
+                        x0 = self._logits(h, torch.zeros((1, V), dtype=torch.bool, device=dev)); t0_ = self._pick(x0)
+                        firsts.append(t0_[0]); flps.append(float(torch.log_softmax(x0, -1)[0, t0_[0]])); caches.append(c1)
+                    first = torch.stack(firsts)
+                    c_n = caches[0]
+                    for Ls in zip(*[c.layers for c in caches]):
+                        Ls[0].keys = torch.cat([self._fit(L.keys, Lmax) for L in Ls], 0)
+                        Ls[0].values = torch.cat([self._fit(L.values, Lmax) for L in Ls], 0)
+                    am_n = torch.cat([self._fit(torch.ones((1, P["e"].shape[1]), dtype=torch.long, device=dev), Lmax) for _, P, _ in new], 0)
+                    del caches
                 nr = []
                 for j, (k, P, c) in enumerate(new):
                     n = P["e"].shape[1]
-                    nr.append(dict(key=k, cap=c, gen=[int(first[j])], tok=int(first[j]), pos=n + int(P["rope"].reshape(-1)[0]),
+                    nr.append(dict(key=k, cap=c, gen=[int(first[j])], lp=[flps[j]], tok=int(first[j]), pos=n + int(P["rope"].reshape(-1)[0]),
                                    len=n + 1, stop=None, seen=None))
                 if rows:
-                    S = max(max(r["len"] - 1 for r in rows), e.shape[1])     # current cache length needed (tokens already in cache)
+                    S = max(max(r["len"] - 1 for r in rows), Lmax)     # current cache length needed (tokens already in cache)
                     for Lo, Ln in zip(cache.layers, c_n.layers):
                         Lo.keys = torch.cat([self._fit(Lo.keys, S), self._fit(Ln.keys, S)], 0)
                         Lo.values = torch.cat([self._fit(Lo.values, S), self._fit(Ln.values, S)], 0)
@@ -239,13 +249,14 @@ class SlotDecoder:
                 with torch.no_grad():
                     h = self.lm(inputs_embeds=self.emb(ids), position_ids=pos, attention_mask=am, past_key_values=cache, use_cache=True,
                                 cache_position=torch.tensor([am.shape[1] - 1], device=dev)).last_hidden_state
-                    nxt = self._pick(self._logits(h, seen))
+                    xl = self._logits(h, seen); nxt = self._pick(xl)
+                    nlp = torch.log_softmax(xl, -1).gather(1, nxt.view(-1, 1)).squeeze(1).tolist()
                 seen[torch.arange(len(rows), device=dev), nxt] = True
                 nl = nxt.tolist(); step += 1
                 for i, r in enumerate(rows):
                     r["pos"] += 1; r["len"] += 1
                     if r["stop"]: continue
-                    r["tok"] = nl[i]; r["gen"].append(nl[i])
+                    r["tok"] = nl[i]; r["gen"].append(nl[i]); r["lp"].append(nlp[i])
                     if nl[i] in (151645, 151643): r["stop"] = "eos"
                     elif len(r["gen"]) >= r["cap"]: r["stop"] = "cap"
             if self.loop_stop:
@@ -297,7 +308,7 @@ class FastTraSeR:
                 C["vfeat"] = mm.get_video_features(C["pv"].to(self.dev, dtype=mm.visual.dtype), C["vgt"][None].to(self.dev))
             mm.get_video_features = lambda *a, **k: C["vfeat"]       # instance override: reuse cached features
             try:
-                e, pos, am, rope, _, _, _ = self.rearrange(model=self.m, input_ids=ids, attention_mask=torch.ones_like(ids),
+                e, pos, am, rope, _, ids_, _ = self.rearrange(model=self.m, input_ids=ids, attention_mask=torch.ones_like(ids),
                 pixel_values_videos=torch.empty(0), video_grid_thw=C["vgt"][None].to(self.dev), image_grid_thw=None, pixel_values=None,
                 second_per_grid_ts=torch.tensor(C["spg"]), obj_token_indices_per_sample=[[i.to(self.dev) for i in per]],
                 obj_traj_start_id=int(self.m.config.obj_traj_start_id), obj_traj_end_id=int(self.m.config.obj_traj_end_id),
@@ -305,7 +316,7 @@ class FastTraSeR:
                 grids_per_temporal_window_per_batch=[gpw])
             finally:
                 del mm.get_video_features
-        return dict(e=e, pos=pos, rope=rope, kept=kept, prefill=int(e.shape[1]), n_obj=len(kept))
+        return dict(e=e, pos=pos, rope=rope, kept=kept, prefill=int(e.shape[1]), n_obj=len(kept), ids=ids_)
 
     # ---------- generation ----------
     def generate(self, Ps, loop_stop=True, cap=None):

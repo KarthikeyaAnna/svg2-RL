@@ -1,0 +1,27 @@
+{
+ "id": "mankenasaikumar/traser-e1-p1b",
+ "title": "traser-e1-p1b",
+ "code_file": "e1_p1b.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": false,
+ "dataset_sources": [
+  "srikarthikeyaa/svg2test-vipseg",
+  "srikarthikeyaa/pvsg-val-traser",
+  "mankenasaikumar/traser-pairlists-p1b"
+ ],
+ "competition_sources": [
+  "arc-prize-2026-arc-agi-3"
+ ],
+ "kernel_sources": [
+  "srikarthikeyaa/traser-assets",
+  "srikarthikeyaa/vidor-prep"
+ ],
+ "model_sources": [
+  "qwen-lm/qwen-3/transformers/8b/1"
+ ],
+ "machine_shape": "NvidiaRtxPro6000"
+}

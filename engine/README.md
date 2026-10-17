@@ -31,7 +31,7 @@ $$\pi(y \mid x) = \pi_{\text{whole}}(\mathcal{G}_{\text{base}} \mid x) \times \p
 ### 2.1 Loss Formulation
 For prompt $x$, sample $G = 8$ stochastic rollouts $o_i \sim \pi_{\theta_{\text{old}}}(\cdot \mid x)$ at temperature $T = 1.0$, $\text{top-}p = 0.95$. Policy parameters $\theta$ (LoRA rank $r = 64$) are optimized via:
 
-$$L_{\text{GRPO}}(\theta) = -\frac{1}{B} \sum_{i=1}^B \left[ \frac{1}{L_{\text{norm}}} \sum_{t=1}^{|o_i|} A_i \log \pi_\theta(y_{i,t} \mid x, y_{i,<t}) - \beta D_{\text{KL}}^{k_3}(\pi_\theta \parallel \pi_{\text{ref}}) \right]$$
+$$L_{\text{GRPO}}(\theta) = -\frac{1}{B} \sum_{i=1}^B \left[ \frac{1}{L_{\text{norm}}} \sum_{t=1}^{|o_i|} A_i \log \pi_\theta(y_{i,t} \mid x, y_{i, 1:t-1}) - \beta D_{\text{KL}}^{k_3}(\pi_\theta \parallel \pi_{\text{ref}}) \right]$$
 
 ### 2.2 Dr. GRPO Advantage Centering
 Standard GRPO scales advantages by empirical standard deviation ($A_i = \frac{r_i - \mu}{\sigma + \epsilon}$), which introduces two pathologies in combinatorial structured generation:
@@ -45,7 +45,7 @@ Standard GRPO scales advantages by empirical standard deviation ($A_i = \frac{r_
 
 ### 2.3 $k_3$ Unbiased Non-Negative KL Estimator
 Policy drift from the frozen base model $\pi_{\text{ref}}$ is regularized via the $k_3$ estimator (Schulman, 2020):
-$$d_t = \log \pi_{\text{ref}}(y_t \mid x, y_{<t}) - \log \pi_\theta(y_t \mid x, y_{<t})$$
+$$d_t = \log \pi_{\text{ref}}(y_t \mid x, y_{1:t-1}) - \log \pi_\theta(y_t \mid x, y_{1:t-1})$$
 $$D_{\text{KL}}^{k_3}(\pi_\theta \parallel \pi_{\text{ref}}) = \exp(d_t) - d_t - 1$$
 
 Properties: strictly non-negative ($\forall d \in \mathbb{R}, \exp(d) - d - 1 \ge 0$), minimum at zero, and exhibits lower variance than $(\log \pi_\theta - \log \pi_{\text{ref}})$.
@@ -78,34 +78,51 @@ F_{1,\text{rel}}(y, \text{GT}_{a,b}) & \text{if } (a, b) \in \text{GT} \\
 #### Advantage Dynamics on Hard Negatives
 For an unlabelled negative pair across $G = 8$ rollouts, suppose $k$ rollouts correctly abstain ($r = +0.5$) and $8 - k$ hallucinate ($r = 0.0$).
 * Mean reward: $\mu_r = \frac{0.5k}{8} \in (0, 0.5)$.
-* Abstaining rollouts receive positive advantage: $A_{\text{abstain}} = 0.5 - \mu_r > 0$, reinforcing termination tokens.
-* Hallucinating rollouts receive negative advantage: $A_{\text{hallucinate}} = -\mu_r < 0$, suppressing invented predicates.
+* Abstaining rollouts receive positive advantage: $A_{\text{abstain}} = 0.5 - \mu_r \gt 0$, reinforcing termination tokens.
+* Hallucinating rollouts receive negative advantage: $A_{\text{hallucinate}} = -\mu_r \lt 0$, suppressing invented predicates.
 * This establishes an exact margin: the policy emits a relation if and only if expected credit exceeds the $+0.5$ reward of remaining silent.
 
 ---
 
 ## 4. Empirical Evaluation
 
-Protocol: strict per-span $\text{tIoU} \ge 0.5$ with Qwen3-8B lenient judge. Significance ($^\dagger$) via 2,000-sample paired bootstrap ($p < 0.05$).
+### 4.1 Primary Benchmark Results (Single-Pass Greedy Decoding)
 
-| Benchmark | Model | Precision | Rel Recall | Triplet Recall | Obj Recall | F1 Score |
+All models evaluated under strict per-span $\text{tIoU} \ge 0.5$ using the Qwen3-8B lenient judge (SVG2 categories). Statistical significance (†) is determined via 2,000-sample paired bootstrap ($p \lt 0.05$ vs. TraSeR baseline).
+
+| Benchmark | Model Configuration | Precision (%) | Rel Recall (%) | Triplet Recall (%) | Obj Acc (%) | F1 Score |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **VidOR-val** | TraSeR (Baseline) | 26.8% | 9.2% | 6.4% | 78.8% | 13.7 |
-| *(835 videos)* | **Plain G3** | **29.8%**$^\dagger$ | **9.9%**$^\dagger$ | **7.1%**$^\dagger$ | **79.1%**$^\dagger$ | **14.8**$^\dagger$ |
-| | **G3 + PG (Headline)** | **32.4%**$^\dagger$ | **12.1%**$^\dagger$ | **8.6%**$^\dagger$ | **79.1%**$^\dagger$ | **17.6**$^\dagger$ *(+3.9)* |
-| **SVG2test** | TraSeR (Baseline) | 18.9% | 24.8% | 12.8% | 50.9% | 21.4 |
-| *(67 videos)* | **Plain G3** | 18.8% | **30.5%**$^\dagger$ | 14.1% | 49.9% | 23.2 |
-| | **G3 + PG (Headline)** | 16.8% | **36.9%**$^\dagger$ | **16.4%**$^\dagger$ | 49.9% | **23.0** |
-| **PVSG-val** | TraSeR (Baseline) | 5.8% | 9.7% | 4.7% | 57.8% | 7.2 |
-| *(62 videos)* | **Plain G3** | 6.2% | 10.1% | 5.1% | 57.3% | 7.7 |
-| | **G3 + PG (Headline)** | 5.9% | **14.1%**$^\dagger$ | **6.4%**$^\dagger$ | 57.3% | **8.3** |
-| *Ablation:* | | | | | | |
-| *SVG2test* | *G3 + Vote3 + PG (9 rollouts)* | *25.4%*$^\dagger$ | *30.9%*$^\dagger$ | *15.2%*$^\dagger$ | *50.9%* | ***27.9***$^\dagger$ |
+| **VidOR-val** (*N*=835) | TraSeR Baseline (A0) | 26.8 |  9.2 | 6.4 | 78.8 | 13.7 |
+| | Plain G3 | 29.8† |  9.9† | 7.1† | 79.1† | 14.8† |
+| | **G3 + PG (Headline)** | **32.4**† | **12.1**† | **8.6**† | 79.1† | **17.6**† |
+| **SVG2test** (*N*=67) | TraSeR Baseline (A0) | 18.9 | 24.8 | 12.8 | 50.9 | 21.4 |
+| | Plain G3 | 18.8 | 30.5† | 14.1 | 49.9 | **23.2** |
+| | **G3 + PG (Headline)** | 16.8 | **36.9**† | **16.4**† | 49.9 | 23.0 |
+| **PVSG-val** (*N*=62) | TraSeR Baseline (A0) |  5.8 |  9.7 | 4.7 | 57.8 |  7.2 |
+| | Plain G3 |  6.2 | 10.1 | 5.1 | 57.3 |  7.7 |
+| | **G3 + PG (Headline)** |  5.9 | **14.1**† | **6.4**† | 57.3 |  **8.3** |
 
-### Findings
-1. **Recall Expansion**: G3 + PG delivers statistically significant relation recall gains across all datasets (SVG2 $+12.1\%$, VidOR $+2.9\%$, PVSG $+4.4\%$) with simultaneous precision gains on VidOR ($26.8\% \to 32.4\%$, $+3.9$ F1).
-2. **Object Grounding Invariance**: Object Recall remains constant across all models (~79.1% on VidOR, ~50% on SVG2), verifying that GRPO aligns relational attention heads without degrading visual trajectory grounding.
-3. **SCB Negative Control**: Self-consistency voting (`Vote3`) achieves $27.9$ F1 on G3 ($+6.5$ over baseline). Running the identical voting harness on the unaligned baseline yielded $\Delta F_1 = +1.40$ (CI $[-0.59, +3.31]$, failing the pre-registered significance gate), proving multi-sample gains stem from RL alignment rather than decoding mechanics.
+*Note: † indicates p < 0.05 against TraSeR baseline. Bold highlights best performance within each benchmark.*
+
+---
+
+### 4.2 Multi-Sample Test-Time Scaling (Vote3 Consensus Ablation)
+
+Compute-matched test-time scaling via self-consistency voting over 9 rollouts ($3 \times 3$ temperature samples, $\tau = 0.7$, frequency penalty 0.3):
+
+| Benchmark | Model Configuration | Precision (%) | Rel Recall (%) | Triplet Recall (%) | Obj Acc (%) | F1 Score |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **VidOR-val** (*N*=835) | G3 + Vote3 + PG (9 rollouts) | 40.0† | 11.6† |  8.5† | 79.1† | 18.0† |
+| **SVG2test** (*N*=67) | G3 + Vote3 + PG (9 rollouts) | 25.4† | 30.9† | 15.2† | 50.9 | 27.9† |
+| **PVSG-val** (*N*=62) | G3 + Vote3 + PG (9 rollouts) |  8.4† | 13.1† |  6.5† | 57.8 | 10.2† |
+
+---
+
+### 4.3 Key Findings
+
+1. **Relation Recall Expansion**: G3 + PG delivers statistically significant relation recall gains across all three benchmarks: SVG2 (+12.1%), VidOR (+2.9%), and PVSG (+4.4%). On VidOR, recall expands while precision simultaneously improves from 26.8% to 32.4%, driving a net **+3.9 F1** gain.
+2. **Object Grounding Invariance**: Object accuracy remains constant across all models (~79.1% on VidOR, ~50% on SVG2), verifying that Dr. GRPO aligns relational attention heads without corrupting or degrading visual trajectory representations.
+3. **SCB Negative Control**: Self-consistency voting (`Vote3`) boosts G3 to 27.9 F1 on SVG2test (+6.5 over baseline). Running the identical voting harness on the unaligned TraSeR baseline yielded only ΔF1 = +1.40 (95% CI [-0.59, +3.31], failing the pre-registered significance gate p > 0.05), confirming that multi-sample scaling gains originate from RL policy alignment rather than decoding mechanics.
 
 ---
 

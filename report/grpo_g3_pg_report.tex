@@ -1,0 +1,184 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.0cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{needspace}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\newcommand{\sig}{$^{\dagger}$}
+\newcommand{\cmark}{\checkmark}
+
+\title{\textbf{Group Relative Policy Optimization (GRPO) for Video Scene Graphs}\\[3pt]
+\large Complete Specifications, Results, and Code Directory Mapping for Plain G3 and G3 + PG}
+\author{\textbf{svg2-killtest Project} \\ Karthikeya Anna}
+\date{October 17, 2026}
+
+\begin{document}
+\maketitle
+\vspace{-6mm}
+
+%=====================================================================
+\section{Overview \& Motivation}
+%=====================================================================
+Video Scene Graph Generation (VidSGG) requires detecting objects, tracking them, and predicting structured triplets $\langle \text{subject}, \text{predicate}, \text{object} \rangle$ grounded with temporal timestamps $[t_{\text{start}}, t_{\text{end}}]$. 
+
+The released baseline model, \textbf{TraSeR} (based on Qwen2.5-VL-3B with object slot tokens), encounters two major failure modes when generating entire graphs in a single sequence:
+\begin{enumerate}
+    \item \textbf{Whole-graph salience bottleneck:} Generating all relations autoregressively causes the model to miss over 60\% of interacting pairs due to token caps, loop-prevention truncation, and attention dispersion.
+    \item \textbf{Precision and hallucination trade-off:} Naive pair querying (adding candidate object pairs) introduces massive false-positive predicates (added-pair precision is only 11\% on SVG2 and 4\% on PVSG). Standard SFT suffers from format/convention bleed and looping.
+\end{enumerate}
+
+To solve this, we developed a two-tier reinforcement learning strategy:
+\begin{itemize}
+    \item \textbf{Plain G3:} Whole-graph GRPO that aligns the base model autoregressively on training videos, lifting precision, eliminating repetition loops, and increasing recall without formatting bleed.
+    \item \textbf{G3 + PG:} A pair-factored architecture that combines G3's primary graph with a specialized pair-level GRPO adapter (\textbf{PG}) trained with explicit abstention rewards on negative candidate pairs.
+\end{itemize}
+
+%=====================================================================
+\section{Method 1: Plain G3 (Whole-Graph GRPO)}
+%=====================================================================
+
+\subsection{Formulation \& Objective}
+Plain G3 optimizes the LoRA weights $\theta$ of the language model backbone via Group Relative Policy Optimization (GRPO). For each video $v$, a group of $G=8$ rollouts $\{o_1, \dots, o_G\}$ is sampled under temperature $T=1.0$ and top-$p=0.95$. 
+
+The surrogate loss per group is:
+\begin{equation}
+\mathcal{L}_{\text{GRPO}}(\theta) = -\frac{1}{G} \sum_{i=1}^G \min \left( \frac{\pi_\theta(o_i|v)}{\pi_{\text{old}}(o_i|v)} A_i, \; \text{clip}\left(\frac{\pi_\theta(o_i|v)}{\pi_{\text{old}}(o_i|v)}, 1-\epsilon, 1+\epsilon\right) A_i \right) + \beta D_{\text{KL}}(\pi_\theta \,||\, \pi_{\text{ref}})
+\end{equation}
+where advantage $A_i = \frac{r_i - \text{mean}(R)}{\text{std}(R)}$ is normalized strictly within the group of 8 candidate graphs of that video.
+
+\subsection{Reward Function}
+The reward $r(o_i, \text{GT}_v)$ is evaluated via \path{engine/reward.py}:
+\begin{equation}
+r(o_i) = \frac{1}{|\text{GT}_v|} \sum_{(s, p, o, \text{span}) \in \text{GT}_v} \max_{(s', p', o', \text{span}') \in o_i} \mathbb{I}(s=s' \land o=o' \land \text{norm}(p)=\text{norm}(p')) \cdot \text{tIoU}(\text{span}, \text{span}')
+\end{equation}
+where temporal overlap $\text{tIoU} \ge 0.5$ provides soft fractional credit. Syntactic looping or malformed outputs receive zero reward.
+
+\subsection{Training Hyperparameters}
+\begin{itemize}
+    \item \textbf{Data:} TraSeR's own SVG2 training splits only (50\% PVD / 50\% VidOR mix; strictly no PVSG-train).
+    \item \textbf{Optimization:} AdamW, learning rate $\eta = 3\times 10^{-5}$, linear warmup for 20 steps, total 300 steps ($\sim 5.2$ hours).
+    \item \textbf{LoRA Adapter:} Rank $r=16$, $\alpha=32$, applied to attention query/key/value projections in language layers.
+    \item \textbf{Batch Size:} 1 video per gradient step ($8$ sampled graphs per step, $G=8$).
+    \item \textbf{Training Run:} Single deterministic training run (\path{traser-e1-g3}).
+\end{itemize}
+
+%=====================================================================
+\section{Method 2: G3 + PG (Pair-Factored Policy Optimization)}
+%=====================================================================
+
+\subsection{Two-Tier Architecture}
+\begin{enumerate}
+    \item \textbf{Base Stage (G3):} Generates the base scene graph $G_{\text{base}}$ for the full video.
+    \item \textbf{Candidate Proposer:} A 11-feature HistGradientBoosting classifier (\path{HistGBM}) scores all unmentioned object pairs based on bounding-box proximity, IoU, relative scale, and visual trajectory overlap. Top candidate pairs with predicted probability $\tau \ge 0.5$ are kept.
+    \item \textbf{Pair-Level Decoder (PG):} For each candidate pair $(a, b)$, the video features are sub-selected to only objects $a$ and $b$, and prompted with \path{"scene\_graph"}. The pair-level adapter decodes the predicate and temporal extent.
+    \item \textbf{Graph Merging:} Valid decoded pair relationships are deduplicated and merged into $G_{\text{base}}$ via \path{scripts/merge_pairs.py}.
+\end{enumerate}
+
+\subsection{PG Training \& The Abstention Reward}
+The pair-level policy is trained via GRPO on pairs sampled from training videos. To combat hallucination on unlabelled pairs, the reward includes an explicit \textbf{abstention bonus}:
+\begin{equation}
+r_{\text{pair}}(y) = 
+\begin{cases}
+\text{RelationCredit}(y, \text{GT}) & \text{if candidate pair is labelled in GT} \\
+0.5 & \text{if pair is an unlabelled hard-negative and model predicts ``none''} \\
+0.0 & \text{if pair is an unlabelled hard-negative and model invents a relation}
+\end{cases}
+\end{equation}
+This teaches the model to remain silent on unlabelled pairs while maintaining high recall on true interactions.
+
+%=====================================================================
+\section{Benchmark Results}
+%=====================================================================
+All metrics are computed using the strict per-span $\text{tIoU} \ge 0.5$ benchmark protocol with the Qwen3-8B lenient judge (SVG2 categories). Statistical significance ($^{\dagger}$) is determined via 2,000-sample paired bootstrap ($p < 0.05$).
+
+\begin{table}[H]
+\centering
+\caption{Benchmark evaluation across SVG2test (67 videos), VidOR-val (835 videos), and PVSG-val (62 videos). $^{\dagger}$ denotes statistically significant improvement over baseline TraSeR.}
+\label{tab:main_results}
+\small
+\begin{tabular}{llccccc}
+\toprule
+\textbf{Benchmark} & \textbf{Model Configuration} & \textbf{Precision (\%)} & \textbf{Rel Recall (\%)} & \textbf{Trip Recall (\%)} & \textbf{Obj Acc (\%)} & \textbf{F1 Score} \\
+\midrule
+\textbf{VidOR-val} & TraSeR Baseline (A0)      & 26.8 & 9.2  & 6.4 & 78.8 & 13.7 \\
+                   & Plain G3                  & \textbf{29.8}\sig & \textbf{9.9}\sig  & 7.1\sig & \textbf{79.1}\sig & \textbf{14.8}\sig \\
+                   & \textbf{G3 + PG (Headline)} & \textbf{32.4}\sig & \textbf{12.1}\sig & \textbf{8.6}\sig & \textbf{79.1}\sig & \textbf{17.6}\sig \\
+\midrule
+\textbf{SVG2test}  & TraSeR Baseline (A0)      & 18.9 & 24.8 & 12.8 & 50.9 & 21.4 \\
+                   & Plain G3                  & 18.8 & \textbf{30.5}\sig & 14.1 & 49.9 & 23.2 \\
+                   & \textbf{G3 + PG (Headline)} & 16.8 & \textbf{36.9}\sig & \textbf{16.4}\sig & 49.9 & \textbf{23.0} \\
+\midrule
+\textbf{PVSG-val}  & TraSeR Baseline (A0)      & 5.8  & 9.7  & 4.7 & 57.8 & 7.2 \\
+                   & Plain G3                  & 6.2  & 10.1 & 5.1 & 57.3 & 7.7 \\
+                   & \textbf{G3 + PG (Headline)} & 5.9  & \textbf{14.1}\sig & \textbf{6.4}\sig & 57.3 & \textbf{8.3} \\
+\midrule
+\multicolumn{7}{l}{\textit{Multi-Sample Consensus Reference (Compute-matched ablation, 9 rollouts, vote3, §67):}} \\
+SVG2test           & G3 + Vote3 + PG           & \textbf{25.4}\sig & \textbf{30.9}\sig & 15.2\sig & 50.9 & \textbf{27.9}\sig \\
+VidOR-val          & G3 + Vote3 + PG           & \textbf{40.0}\sig & \textbf{11.6}\sig & \textbf{8.5}\sig & \textbf{79.1}\sig & \textbf{18.0}\sig \\
+PVSG-val           & G3 + Vote3 + PG           & \textbf{8.4}\sig  & \textbf{13.1}\sig & \textbf{6.5}\sig & 57.8 & \textbf{10.2}\sig \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Takeaways:}
+\begin{itemize}
+    \item \textbf{Plain G3 alone} significantly beats TraSeR on VidOR Precision, Recall, and F1 simultaneously ($+1.1$ F1$^{\dagger}$) and achieves a $+5.7\%$ recall gain on SVG2 without dropping precision.
+    \item \textbf{G3 + PG} beats TraSeR on \textbf{Relation Recall and Triplet Recall across all three benchmarks with statistical significance}, and delivers a massive $+3.9$ F1 improvement on VidOR.
+\end{itemize}
+
+%=====================================================================
+\section{Code Directory Mapping}
+%=====================================================================
+The implementation is self-contained within the repository. Table~\ref{tab:code_map} details the exact file locations for each component.
+
+\begin{table}[H]
+\centering
+\caption{Codebase directory mapping for Plain G3 and G3 + PG.}
+\label{tab:code_map}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Component} & \textbf{Repository Path} & \textbf{Description} \\
+\midrule
+\multicolumn{3}{l}{\textbf{1. Core Engines \& Reward Functions}} \\
+GRPO Trainer           & \path{engine/grpo.py}           & Group relative policy update, advantage norm, KL penalty \\
+Reward Metric          & \path{engine/reward.py}         & Graph-level soft tIoU reward \& relation matching \\
+Fast Slot Decoder      & \path{engine/traser_fast.py}    & Left-padded batching, GQA attention fix, LoopStop4 \\
+Smoke Tests            & \path{engine/smoke_grpo.py}     & CPU/GPU smoke verification for GRPO forward/backward \\
+\midrule
+\multicolumn{3}{l}{\textbf{2. Training Configurations \& Kernels}} \\
+G3 Kernel Config       & \path{kaggle/e1/cfg_G3.py}      & Hyperparameters, lr $3\times 10^{-5}$, 300 steps, $G=8$ \\
+G3 Kernel Script       & \path{kaggle/e1/G3/e1_g3.py}    & Assembled Kaggle script for Plain G3          \\
+GRPO Kernel Body       & \path{kaggle/e1/grpo_part.py}   & Per-step rollout sampling, advantage scoring, optimizer \\
+PG Kernel Config       & \path{kaggle/e1/cfg_PG.py}      & Pair-level GRPO configuration (120 steps) \\
+PG Kernel Script       & \path{kaggle/e1/PG/e1_pg.py}    & Assembled Kaggle script for Pair GRPO \\
+PG Kernel Body         & \path{kaggle/e1/pg_part.py}     & Abstention reward loop and candidate pair decodes \\
+\midrule
+\multicolumn{3}{l}{\textbf{3. Pair Proposer, Merging \& Evaluation Scripts}} \\
+Pair Candidate Ranker  & \path{scripts/pair_feats.py}    & Extracts 11 geometric spatio-temporal features \\
+Pair Generation        & \path{scripts/make_pairs.py}    & HistGBM model inference to produce candidate pair lists \\
+Pair Merging           & \path{scripts/merge_pairs.py}   & Integrates decoded candidate pairs into base G3 graphs \\
+Deduplication          & \path{scripts/dedup.py}         & Cleans repeated text patterns and duplicate spans \\
+Scoring Harness        & \path{scripts/score_runs.py}    & Computes P, R, and F1 across benchmark predictions \\
+Bootstrap Significance & \path{scripts/bootstrap.py}     & 2,000-fold paired bootstrap confidence intervals \\
+Triplet Recall Tool    & \path{scripts/boot_triplet.py}  & Measures joint relation + object label correctness \\
+\midrule
+\multicolumn{3}{l}{\textbf{4. Outputs and Checkpoints}} \\
+G3 Predictions& \path{out/e1_g3/}               & Full graph outputs on SVG2, VidOR, PVSG \\
+PG Decodes             & \path{out/e1_pg/}               & Top-40 candidate pair decodes with PG adapter \\
+G3 + PG Merged Graphs  & \path{out/e1_g3_pg/}            & Merged headline evaluation files \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

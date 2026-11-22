@@ -3,7 +3,6 @@ k2home/
 kaggle.json
 *.token
 .env
-
 # ---- environments and caches
 venv/
 .venv/

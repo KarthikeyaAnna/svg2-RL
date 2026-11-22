@@ -20,6 +20,8 @@ B = {
   "pvsg": dict(masks=load_rows(f"{PVSG_DIR}/masks.parquet"), gt=load_rows(f"{PVSG_DIR}/gt.parquet"), root=PVSG_DIR, stride=1,
                fps=(lambda m: (lambda v: m[v]["fps_eff"]))(json.load(open(f"{PVSG_DIR}/meta.json")))),
 }
+if globals().get("SV_MASKS"):                                        # SVG2test SA-V part (33 videos, 2 fps frames, mask stride 12)
+    B["sav"] = dict(masks=load_rows(SV_MASKS), gt=load_rows(SV_GT), root=os.path.dirname(SV_MASKS), stride=12, fps=lambda v: 2.0)
 def make_cpu_fn(b, max_obj=40):
     def cpu_fn(v):
         r = b["masks"][v]; H, W, nf, no = r["mask_height"], r["mask_width"], r["num_frames"], r["num_objects"]
@@ -38,7 +40,7 @@ def train_arm():
     rng0 = random.Random(0); items = []
     for name in sorted(tr):
         vv = list(tr[name]); rng0.shuffle(vv); items += [(v, name) for v in vv[:MAX_PER_SOURCE]]
-    rng0.shuffle(items)
+    items = items * globals().get("EPOCHS", 1); rng0.shuffle(items)
     model.eval(); d0 = dev_reward(srcs, dv); print("SFT dev step 0", json.dumps(d0), flush=True)
     def cpu_job(v, src): return eng.cpu_stage(**srcs[src]["cpu_fn"](v))
     nl = apply_lora(model.model.language_model, r=LORA_R, alpha=2 * LORA_R, freeze=model)
@@ -59,7 +61,12 @@ def train_arm():
         kr = None
         if TARGET_VIEW[src] == "salient":
             touch = {frozenset(x) for x in json.loads(lab["touching"])}; kr = lambda s_, o_: frozenset((s_, o_)) in touch
-        tgt = build_target(objs, rels, P["kept"], keep_rel=kr)
+        if globals().get("DISTILL") is not None:                         # §98: teacher graph (vote3 of G3 + PG pairs) as the target
+            d = DISTILL.get(src, {}).get(v)
+            tgt = d["text"] if d is not None and list(d["kept"]) == list(P["kept"]) else None
+            if d is not None and tgt is None: T["distill_kept_mismatch"] = T.get("distill_kept_mismatch", 0) + 1
+        else:
+            tgt = build_target(objs, rels, P["kept"], keep_rel=kr)
         if tgt is None: skipped += 1; continue
         loss, Tn = sample_loss(eng, P, tgt); (loss / ACCUM).backward(); losses.append(float(loss)); ntok += Tn
         if (i + 1) % ACCUM == 0 or i + 1 == len(items):
@@ -74,14 +81,18 @@ def train_arm():
     d1 = dev_reward(srcs, dv); T.update(dev_start=d0, dev_final=d1); print("SFT dev final", json.dumps(d1), flush=True)
     torch.cuda.empty_cache()
 # GRPO_PART
-if ARM in ("A1", "A2"): train_arm()
-elif ARM in ("G1", "G2", "G3"): grpo_arm()
+if ARM in ("A1", "A2", "DS"): train_arm()
+elif ARM in ("G1", "G2", "G3", "G4", "G5"): grpo_arm()
 elif ARM == "PS": pairsft_arm()
 elif ARM == "PG": pg_arm()
 elif ARM == "PV": pv_arm()
 elif ARM == "HX": hx_arm()
-elif ARM in ("SC", "SCB"): sc_arm()
-elif ARM == "PH": ph_arm()
+elif ARM in ("SC", "SCB", "DT"): sc_arm()
+elif ARM in ("PH", "PHA", "PHB"): ph_arm()
+elif ARM == "KT": kt_arm()
+elif ARM == "SV": sv_arm()
+elif ARM == "VS": vs_arm()
+elif ARM == "SVP": svp_arm()
 
 # ---------------- evaluation
 def dil(m, k=2):
@@ -116,7 +127,7 @@ for bn in BENCHES:
     prompt = STYLE_PROMPT_TEST[bn]; tb = time.time(); rng = random.Random(0); stops = collections.Counter(); ntok = 0
     fo = {n: open(f"{OUT}/{bn}_{n}.jsonl", "w") for n in ("full", "pairs_sal", "pairs_rnd")}
     t_full = t_pairs = 0.0
-    CHUNK = CHUNKS[bn]
+    CHUNK = CHUNKS.get(bn, 32)
     for c0 in range(0, len(vids), CHUNK):
         ch = vids[c0:c0 + CHUNK]; t1 = time.time()
         res = eng.run_slots(ch, cpu_fn, max_slots=32, kv_budget_gb=40.0, loop_stop=True, log=lambda s: None, prompt=prompt)
@@ -158,5 +169,5 @@ if JUDGE_DIR:
                     for q in P_.get((s, ob), []):
                         if q.lower().strip() != p.lower().strip(): pairs.add(("relation predicate", p.lower().strip(), q.lower().strip()))
     pairs = sorted(pairs); print("pairs to judge", len(pairs), flush=True)
-    run_judge(pairs, JUDGE_DIR, f"{OUT}/judge_{ARM}.json")
+    if pairs: run_judge(pairs, JUDGE_DIR, f"{OUT}/judge_{ARM}.json")      # empty -> do not overwrite an arm's own judge file (SV bug)
 print("E1 DONE", ARM, json.dumps(T), flush=True)

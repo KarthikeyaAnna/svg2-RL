@@ -73,3 +73,130 @@ kaggle/speedtest/
 kaggle/profile/
 k3.sh
 k3home/
+k1home/
+kaggle/fetch_private/
+
+# ==== Omni-RGPT (Qwen2.5-VL-3B + token marks) track: only the main scripts are shared
+# results page: omni_rgpt/README.md
+# main code kept visible:
+#   omni_rgpt/finetune/   fine-tuning: model (token marks), SFT loop, v1 / v2 training scripts (copies of the run files below)
+#   kaggle/qtm/QE_V4C2/qtm_qe_v4c2.py, kaggle/qtm/DS/eval_v5_ds_shard.py   v1 / v2 test decode
+#   kaggle/qtm/DS/prep_academic.py, fetch3_pvd.py, kaggle/fetch/svg2_fetch.py   training-data preparation
+#   scripts/score_exact_graph.py, score_paired.py, score_judge_all.py, score_judge_v4.py, judge_gemini.py, qtm_test_cands.py
+# originals of the files copied into omni_rgpt/finetune/ (kept locally, not shared twice)
+kaggle/qtm/qtm_core.py
+kaggle/qtm/qtm_run.py
+kaggle/qtm/V4C1/
+kaggle/qtm/V4C2/
+kaggle/qtm/DS/qs_v6_ds.py
+kaggle/qtm/DS/after_v6.py
+kaggle/qtm/DS/dev_ids_v3.json
+# local run logs and personal tooling
+/*.log
+k1.sh
+scripts/*.sh
+# Kaggle debugging / mount-bisection / canary kernels
+kaggle/bisect_*/
+kaggle/canary/
+kaggle/cpudiag/
+kaggle/diag*/
+kaggle/gpucanary*/
+kaggle/mirror/
+kaggle/pack_v4/
+kaggle/testpack/
+kaggle/stage_*/
+kaggle/traser_v2v3*/
+kaggle/traser_v4*/
+traser_plus_2heads/
+scratch/
+vidor-prep/
+slides/
+engine/credit.py
+# superseded TraSeR-pipeline experiment kernels (not used by the shared results)
+kaggle/e1/DS/
+kaggle/e1/DT/
+kaggle/e1/G4/
+kaggle/e1/G5/
+kaggle/e1/G5X/
+kaggle/e1/G6/
+kaggle/e1/G6L/
+kaggle/e1/JS*/
+kaggle/e1/JT/
+kaggle/e1/KT/
+kaggle/e1/PHA/
+kaggle/e1/PHB/
+kaggle/e1/SV/
+kaggle/e1/SVP/
+kaggle/e1/VS2/
+kaggle/e1/cfg_DS.py
+kaggle/e1/cfg_DT.py
+kaggle/e1/cfg_G4.py
+kaggle/e1/cfg_G5.py
+kaggle/e1/cfg_G5X.py
+kaggle/e1/cfg_G6.py
+kaggle/e1/cfg_G6L.py
+kaggle/e1/cfg_KT.py
+kaggle/e1/cfg_PHA.py
+kaggle/e1/cfg_PHB.py
+kaggle/e1/cfg_SV.py
+kaggle/e1/cfg_SVP.py
+kaggle/e1/cfg_VS.py
+kaggle/e1/kt_part.py
+kaggle/e1/sv_part.py
+kaggle/e1/svp_part.py
+kaggle/e1/vs_part.py
+# Omni-RGPT: superseded iterations, smoke tests, builders, diagnostics
+kaggle/fetch/build_fetch*.py
+kaggle/qtm/build_qtm.py
+kaggle/qtm/QC1/
+kaggle/qtm/QC2/
+kaggle/qtm/QE0/
+kaggle/qtm/QE0b1/
+kaggle/qtm/QE_V4K8/
+kaggle/qtm/QEqs/
+kaggle/qtm/QEqs1/
+kaggle/qtm/QG/
+kaggle/qtm/QS/
+kaggle/qtm/QS3/
+kaggle/qtm/QSP/
+kaggle/qtm/QSS/
+kaggle/qtm/*/kernel-metadata.json
+kaggle/qtm/V4C2/qtm_v4c2.py
+kaggle/qtm/DS/after_v5*.py
+kaggle/qtm/DS/attrib_*.py
+kaggle/qtm/DS/bench_v5.py
+kaggle/qtm/DS/build_*.py
+kaggle/qtm/DS/mark_ready.py
+kaggle/qtm/DS/prep_ds.py
+kaggle/qtm/DS/qe_v4k8_ds.py
+kaggle/qtm/DS/qs_v5_ds.py
+kaggle/qtm/DS/exclude_ids.json
+# one-off analysis / superseded scoring scripts
+scripts/build_distill_targets.py
+scripts/build_mask_index.py
+scripts/credit_dilution.py
+scripts/dd_*.py
+scripts/eval_head_v2.py
+scripts/fgpo_verify.py
+scripts/fp_breakdown*.py
+scripts/gate_g5.py
+scripts/gemini_blind.py
+scripts/head_v2_eval.py
+scripts/kappa_kill.py
+scripts/kt_eval.py
+scripts/merge_ph.py
+scripts/monitor_and_orchestrate.py
+scripts/oac_eval.py
+scripts/pred_probe.py
+scripts/prep_sav_train.py
+scripts/q0_normalize.py
+scripts/qtm_score.py
+scripts/score_all_qtm_v4.py
+scripts/score_ft100.py
+scripts/score_judge_v6.py
+scripts/score_qs_dev.py
+scripts/score_sv.py
+scripts/sel_test.py
+scripts/teacher_ceiling.py
+scripts/tree_importance.py
+scripts/vs_eval.py

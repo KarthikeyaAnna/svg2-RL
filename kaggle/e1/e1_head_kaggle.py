@@ -1,4 +1,5 @@
 import glob, json, os, subprocess, sys, time, math, random, itertools, collections, gc
+T0 = time.time()                                               # kernel start (deadline guards)
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 def find(p, root="/kaggle/input"):
     h = sorted(glob.glob(f"{root}/{p}", recursive=True)); print("find", p, "->", h[:2], flush=True); return h[0]
@@ -18,6 +19,7 @@ RELPARSE_SRC
 JUDGE_SRC
 REWARD_SRC
 GRPO_SRC
+CREDIT_SRC
 model = TRASER.from_pretrained(ASSETS, torch_dtype=torch.bfloat16, attn_implementation="sdpa").cuda().eval()
 tok = AutoTokenizer.from_pretrained(ASSETS, use_fast=False); ftok = AutoTokenizer.from_pretrained(ASSETS, use_fast=True)
 proc = AutoProcessor.from_pretrained(f"{ROOT}/Qwen2.5-VL-3B-Instruct"); proc.tokenizer = tok

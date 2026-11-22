@@ -67,3 +67,44 @@ def reward(text, kept, label_objects, label_rels, w_obj=0.25, w_fmt=0.2):
     except Exception: valid = False
     R = f1 + w_obj * obj_acc - (0.0 if (complete and valid) else w_fmt)
     return R, dict(f1=f1, p=prec, r=rec, obj=obj_acc, n_pred=len(P), n_label=len(G), valid=valid)
+
+
+def reward_g4(text, kept, label_objects, label_rels, touching_pairs=None,
+              w_obj=0.25, w_fmt=0.2, lam_fp=0.15):
+    """G4 reward: base F1 + geometry-gated false-positive penalty.
+    
+    touching_pairs: set of frozenset({obj_id_a, obj_id_b}) for pairs
+                    whose masks make dilated contact on any frame.
+    """
+    R_base, d = reward(text, kept, label_objects, label_rels, w_obj, w_fmt)
+    if touching_pairs is None:
+        touching_pairs = set()
+    idx = {oid: i + 1 for i, oid in enumerate(kept)}
+    labelled_pairs = set()
+    for r in label_rels:
+        try:
+            s, o = int(r[0]), int(r[2])
+            if s in idx and o in idx:
+                labelled_pairs.add(frozenset((s, o)))
+        except Exception:
+            pass
+    
+    n_geo_fp = 0
+    for r in parse_rels(text):
+        try:
+            s, o = int(r[0]), int(r[2])
+            s_oid = kept[s - 1] if 1 <= s <= len(kept) else -1
+            o_oid = kept[o - 1] if 1 <= o <= len(kept) else -1
+            pair = frozenset((s_oid, o_oid))
+            if pair not in labelled_pairs and pair not in touching_pairs:
+                n_geo_fp += 1
+        except Exception:
+            pass
+    
+    n_pred = d["n_pred"]
+    penalty = lam_fp * n_geo_fp / max(1, n_pred)
+    R = R_base - penalty
+    d["n_geo_fp"] = n_geo_fp
+    d["penalty"] = round(penalty, 4)
+    return R, d
+

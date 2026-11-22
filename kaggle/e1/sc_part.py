@@ -12,14 +12,19 @@ def sc_arm():
         merge_lora(model.model.language_model)
     model.eval(); srcs = load_sources(); _, dv = split_train_dev(srcs, N_DEV); jobs = []
     if globals().get("SC_OAC"): oac_arm(srcs, dv); T["oac_done"] = True
-    for name in sorted(dv): jobs.append(("dev", name, dv[name], srcs[name]["cpu_fn"], 16))
-    for bn in SC_BENCHES:
+    if globals().get("SC_TRAIN"):                                       # distillation teacher (§98): non-dev TRAINING videos only
+        tr, _ = split_train_dev(srcs, N_DEV)
+        for name in sorted(tr): jobs.append(("train", name, tr[name][:LIMIT_VIDS], srcs[name]["cpu_fn"], 16))
+    else:
+        for name in sorted(dv): jobs.append(("dev", name, dv[name], srcs[name]["cpu_fn"], 16))
+    for bn in ([] if globals().get("SC_TRAIN") else SC_BENCHES):
         b = B[bn]; jobs.append((bn, bn, sorted(v for v in b["masks"] if v in b["gt"] and frames_of(v, b["root"]))[:LIMIT_VIDS], make_cpu_fn(b), {"pvsg": 8}.get(bn, 32)))
     ci = 0
     for set_, name, vids, cpu_fn, ch_n in jobs:
         t1 = time.time(); stops = collections.Counter()
         with open(f"{OUT}/{set_}_samples.jsonl", "a") as fo:
             for c0 in range(0, len(vids), ch_n):
+                if time.time() - T0 > globals().get("SC_DEADLINE", 1e18): T["sc_deadline_hit"] = f"{set_}/{name}@{c0}"; break   # never risk the 12 h kill
                 ch = vids[c0:c0 + ch_n]; ci += 1
                 with torch.no_grad():
                     prep, _ = eng.prepare(ch, cpu_fn, 6, "scene_graph")

@@ -1,4 +1,5 @@
 import glob, json, os, subprocess, sys, time, math, random, itertools, collections, gc
+T0 = time.time()                                               # kernel start (deadline guards)
 R = os.path.expanduser("~/svg2-killtest"); OUT = "/tmp/claude-1000/-home-karthik/bb3aaa05-9eee-4a51-ad81-9ac5dda25ab2/scratchpad/e1_smoke"; os.makedirs(OUT, exist_ok=True)
 sys.path.insert(0, f"{R}/SVG2/traser")
 import numpy as np, torch, pyarrow.parquet as pq
@@ -15,10 +16,12 @@ RELPARSE_SRC
 JUDGE_SRC
 REWARD_SRC
 GRPO_SRC
+CREDIT_SRC
 cfg = json.load(open(f"{R}/traser_cfg/config.json"))
 cfg.update(hidden_size=512, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=1, intermediate_size=512, max_window_layers=2, temporal_resampler_n_latents=4, object_resampler_n_latents=4, resampler_depth=1)
 cfg["vision_config"].update(depth=2, hidden_size=64, out_hidden_size=512, num_heads=2, intermediate_size=128, fullatt_block_indexes=[1])
-if "text_config" in cfg: cfg["text_config"].update(hidden_size=512, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=1, intermediate_size=512)
+if "text_config" in cfg: cfg["text_config"].update(hidden_size=512, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=1, intermediate_size=512, layer_types=["full_attention"] * 2)
+if "layer_types" in cfg: cfg["layer_types"] = ["full_attention"] * 2
 config = Qwen2_5_VLConfig(**cfg); config._attn_implementation = "sdpa"; torch.manual_seed(0)
 model = TRASER(config).float().eval()
 tok = AutoTokenizer.from_pretrained(f"{R}/traser_cfg", use_fast=False); ftok = AutoTokenizer.from_pretrained(f"{R}/traser_cfg", use_fast=True)
